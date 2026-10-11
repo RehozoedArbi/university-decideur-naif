@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: university-decideur
+
+---
+# ServiceAccount dédié au décideur
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: decideur
+  namespace: {{ .Values.namespace }}
+
+---
+# ClusterRole en lecture seule — le décideur observe, il n'agit jamais
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: decideur-readonly
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: decideur-readonly
+subjects:
+  - kind: ServiceAccount
+    name: decideur
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: decideur-readonly
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decideur
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: decideur
+    app.kubernetes.io/part-of: university-decideur
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: decideur
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: decideur
+        app.kubernetes.io/part-of: university-decideur
+    spec:
+      serviceAccountName: decideur
+      containers:
+        - name: decideur
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PROMETHEUS_URL
+              value: {{ .Values.config.prometheusUrl | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.config.pollIntervalSeconds | quote }}
+            - name: APP_NAMESPACE
+              value: {{ .Values.appNamespace | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: THRESHOLD_LATENCY_P95
+              value: {{ .Values.config.thresholds.latencyP95Seconds | quote }}
+            - name: THRESHOLD_ERROR_RATE
+              value: {{ .Values.config.thresholds.errorRate5xx | quote }}
+            - name: THRESHOLD_ANOMALY_DURATION
+              value: {{ .Values.config.thresholds.anomalyDurationSeconds | quote }}
+            - name: THRESHOLD_MIN_REPLICAS
+              value: {{ .Values.config.thresholds.minReplicasReady | quote }}
+            - name: THRESHOLD_CASCADE
+              value: {{ .Values.config.thresholds.cascadeServicesThreshold | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+---
+# NetworkPolicy — le décideur peut uniquement appeler Prometheus
+# Il n'a aucun accès aux services applicatifs (il passe par Prometheus)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: decideur-policy
+  namespace: {{ .Values.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: decideur
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []   # personne ne doit appeler le décideur
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090

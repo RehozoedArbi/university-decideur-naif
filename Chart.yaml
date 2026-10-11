@@ -1,0 +1,9 @@
+apiVersion: v2
+name: university-decideur
+description: >
+  Décideur naïf (Naive Healer) — surveille Prometheus et propose des
+  actions de remédiation sans vérification de sûreté. Ses propositions
+  sont interceptées par le moteur de vérification avant exécution.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,26 @@
+namespace: university-decideur
+appNamespace: university-app
+
+image:
+  repository: darbi/university-decideur
+  tag: latest
+  pullPolicy: Always
+
+config:
+  prometheusUrl: "http://prometheus.monitoring.svc.cluster.local:9090"
+  pollIntervalSeconds: 10
+  logLevel: INFO
+  thresholds:
+    latencyP95Seconds: "0.5"
+    errorRate5xx: "0.10"
+    anomalyDurationSeconds: "60"
+    minReplicasReady: "1"
+    cascadeServicesThreshold: "2"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 150m
+    memory: 128Mi
